@@ -3,6 +3,7 @@ package ipcgo
 /*
 #include<sys/shm.h>
 #include<sys/ipc.h>
+#include<sys/types.h>
 */
 import "C"
 
@@ -15,7 +16,6 @@ import (
 )
 
 const (
-	pageSize   = 1 << 12
 	SHM_R      = C.SHM_R
 	SHM_W      = C.SHM_W
 	SHM_RDONLY = C.SHM_RDONLY
@@ -35,26 +35,15 @@ type C_shmid_ds struct {
 	Shm_nattch uint64
 }
 
-// C_ipc_perm is the struct from C
-type C_ipc_perm struct {
-	Key  int32
-	Uid  uint32
-	Gid  uint32
-	Cuid uint32
-	Cgid uint32
-	Mode uint16
-	Seq  uint16
-}
-
 // NewSharedMemory returns a new shared memory
 func NewSharedMemory(key int, size uint64, flag int) (*SharedMemory, error) {
 	if key == C.IPC_PRIVATE {
 		return nil, errors.New("creating of private memory region is not supported")
 	}
 	flag |= C.IPC_CREAT | C.IPC_EXCL
-	id, _, errno := syscall.Syscall(syscall.SYS_SHMGET, uintptr(key), uintptr(size), uintptr(flag))
+	id, _, errno := syscall.Syscall(syscall.SYS_SHMGET, uintptr(C.key_t(key)), uintptr(C.size_t(size)), uintptr(C.int(flag)))
 	if errno != 0 {
-		return nil, errors.Errorf("failed to create shm, error %s", errno.Error())
+		return nil, errors.Wrap(errno, "failed to create shm")
 	}
 	return &SharedMemory{
 		shmid:      int(id),
@@ -67,9 +56,9 @@ func GetSharedMemory(key int) (*SharedMemory, error) {
 	if key == C.IPC_PRIVATE {
 		return nil, errors.New("getting a private memory region is not supported")
 	}
-	id, _, errno := syscall.Syscall(syscall.SYS_SHMGET, uintptr(key), 0, 0)
+	id, _, errno := syscall.Syscall(syscall.SYS_SHMGET, uintptr(C.key_t(key)), 0, 0)
 	if errno != 0 {
-		return nil, errors.Errorf("failed to get shm, error %s", errno.Error())
+		return nil, errors.Wrap(errno, "failed to get shm")
 	}
 	ds, err := stat(int(id))
 	if err != nil {
@@ -81,6 +70,7 @@ func GetSharedMemory(key int) (*SharedMemory, error) {
 	}, nil
 }
 
+// SharedMemory represents a System V shared memory region
 type SharedMemory struct {
 	shmid      int
 	actualSize uint64
@@ -172,16 +162,16 @@ func (s *SharedMemory) Close() error {
 func (s *SharedMemory) Delete() error {
 	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(s.shmid), uintptr(C.IPC_RMID), 0)
 	if errno != 0 {
-		return errors.Errorf("failed to delete shm, error %s", errno.Error())
+		return errors.Wrap(errno, "failed to delete shm")
 	}
 	return nil
 }
 
 // Attach attaches the memory to process's virtual memory space
 func (s *SharedMemory) Attach(addr uintptr, flag int) error {
-	shmAddr, _, errno := syscall.Syscall(syscall.SYS_SHMAT, uintptr(s.shmid), addr, uintptr(flag))
+	shmAddr, _, errno := syscall.Syscall(syscall.SYS_SHMAT, uintptr(C.int(s.shmid)), addr, uintptr(C.int(flag)))
 	if errno != 0 {
-		return errors.Errorf("failed to attach memory, error %s", errno.Error())
+		return errors.Wrap(errno, "failed to attach memory")
 	}
 	s.addr = shmAddr
 	s.seek = 0
@@ -196,9 +186,9 @@ func (s *SharedMemory) Stat() (*C_shmid_ds, error) {
 // SetStat sets the settable fields of shm
 func (s *SharedMemory) SetStat(uid, gid *uint32, mode *uint16) error {
 	var cstat C.struct_shmid_ds
-	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(s.shmid), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
+	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(s.shmid)), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
 	if errno != 0 {
-		return errors.Errorf("failed to get stat, error %s", errno.Error())
+		return errors.Wrap(errno, "failed to get stat")
 	}
 	if uid != nil {
 		cstat.shm_perm.uid = C.uint(*uid)
@@ -209,18 +199,18 @@ func (s *SharedMemory) SetStat(uid, gid *uint32, mode *uint16) error {
 	if mode != nil {
 		cstat.shm_perm.mode = C.ushort(*mode)
 	}
-	_, _, errno = syscall.Syscall(syscall.SYS_SHMCTL, uintptr(s.shmid), uintptr(C.IPC_SET), uintptr(unsafe.Pointer(&cstat)))
+	_, _, errno = syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(s.shmid)), uintptr(C.IPC_SET), uintptr(unsafe.Pointer(&cstat)))
 	if errno != 0 {
-		return errors.Errorf("failed to set stat, error %s", errno.Error())
+		return errors.Wrap(errno, "failed to set stat")
 	}
 	return nil
 }
 
 func stat(id int) (*C_shmid_ds, error) {
 	var cstat C.struct_shmid_ds
-	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(id), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
+	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(id)), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
 	if errno != 0 {
-		return nil, errors.Errorf("failed to get stat, error %s", errno.Error())
+		return nil, errors.Wrap(errno, "failed to get stat")
 	}
 	return &C_shmid_ds{
 		Shm_perm: C_ipc_perm{
@@ -244,9 +234,9 @@ func stat(id int) (*C_shmid_ds, error) {
 }
 
 func (s *SharedMemory) detach() error {
-	_, _, errno := syscall.Syscall(syscall.SYS_SHMDT, uintptr(s.addr), 0, 0)
+	_, _, errno := syscall.Syscall(syscall.SYS_SHMDT, s.addr, 0, 0)
 	if errno != 0 {
-		return errors.Errorf("failed to detach memory, error %s", errno.Error())
+		return errors.Wrap(errno, "failed to detach memory")
 	}
 	return nil
 }
