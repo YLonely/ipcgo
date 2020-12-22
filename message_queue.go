@@ -163,7 +163,7 @@ func (mq *MessageQueue) Send(msg *Message, flag int) error {
 	for i, b := range msg.MText {
 		cMsg.mtext[i] = C.char(b)
 	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_MSGSND, uintptr(C.int(mq.queueID)), uintptr(unsafe.Pointer(&msg)), uintptr(C.size_t(n)), uintptr(C.int(flag)), 0, 0)
+	_, _, errno := syscall.Syscall6(syscall.SYS_MSGSND, uintptr(C.int(mq.queueID)), uintptr(unsafe.Pointer(&cMsg)), uintptr(C.size_t(n)), uintptr(C.int(flag)), 0, 0)
 	if errno != 0 {
 		return errors.Wrap(errno, "failed to send message")
 	}
