@@ -40,12 +40,12 @@ type Message struct {
 // NewMessageQueue creates a message queue
 func NewMessageQueue(key int, flag int) (*MessageQueue, error) {
 	if key == C.IPC_PRIVATE {
-		return nil, errors.New("creating of private message queue is not supported")
+		return nil, errors.New("creating a private message queue is not supported")
 	}
 	flag |= C.IPC_CREAT | C.IPC_EXCL
 	id, _, errno := syscall.Syscall(syscall.SYS_MSGGET, uintptr(C.key_t(key)), uintptr(C.int(flag)), 0)
 	if errno != 0 {
-		return nil, errors.Wrap(errno, "failed to create message queue")
+		return nil, errors.Wrap(errno, "failed to create a message queue")
 	}
 	return &MessageQueue{
 		queueID: int(id),
@@ -55,7 +55,7 @@ func NewMessageQueue(key int, flag int) (*MessageQueue, error) {
 // GetMessageQueue returns a message queue already exists
 func GetMessageQueue(key int) (*MessageQueue, error) {
 	if key == C.IPC_PRIVATE {
-		return nil, errors.New("creating of private message queue is not supported")
+		return nil, errors.New("creating a private message queue is not supported")
 	}
 	id, _, errno := syscall.Syscall(syscall.SYS_MSGGET, uintptr(C.key_t(key)), 0, 0)
 	if errno != 0 {

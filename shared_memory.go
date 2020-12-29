@@ -43,7 +43,7 @@ func NewSharedMemory(key int, size uint64, flag int) (*SharedMemory, error) {
 	flag |= C.IPC_CREAT | C.IPC_EXCL
 	id, _, errno := syscall.Syscall(syscall.SYS_SHMGET, uintptr(C.key_t(key)), uintptr(C.size_t(size)), uintptr(C.int(flag)))
 	if errno != 0 {
-		return nil, errors.Wrap(errno, "failed to create shm")
+		return nil, errors.Wrap(errno, "failed to create a new shared memory")
 	}
 	return &SharedMemory{
 		shmid:      int(id),
@@ -60,13 +60,13 @@ func GetSharedMemory(key int) (*SharedMemory, error) {
 	if errno != 0 {
 		return nil, errors.Wrap(errno, "failed to get shm")
 	}
-	ds, err := stat(int(id))
+	ds, err := shmStat(int(id))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get info of shm")
 	}
 	return &SharedMemory{
 		shmid:      int(id),
-		actualSize: roundUp(ds.Shm_segsz, pageSize),
+		actualSize: roundUp(uint64(ds.shm_segsz), pageSize),
 	}, nil
 }
 
@@ -180,37 +180,9 @@ func (s *SharedMemory) Attach(addr uintptr, flag int) error {
 
 // Stat returns the info of the shared memory
 func (s *SharedMemory) Stat() (*C_shmid_ds, error) {
-	return stat(s.shmid)
-}
-
-// SetStat sets the settable fields of shm
-func (s *SharedMemory) SetStat(uid, gid *uint32, mode *uint16) error {
-	var cstat C.struct_shmid_ds
-	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(s.shmid)), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
-	if errno != 0 {
-		return errors.Wrap(errno, "failed to get stat")
-	}
-	if uid != nil {
-		cstat.shm_perm.uid = C.uint(*uid)
-	}
-	if gid != nil {
-		cstat.shm_perm.gid = C.uint(*gid)
-	}
-	if mode != nil {
-		cstat.shm_perm.mode = C.ushort(*mode)
-	}
-	_, _, errno = syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(s.shmid)), uintptr(C.IPC_SET), uintptr(unsafe.Pointer(&cstat)))
-	if errno != 0 {
-		return errors.Wrap(errno, "failed to set stat")
-	}
-	return nil
-}
-
-func stat(id int) (*C_shmid_ds, error) {
-	var cstat C.struct_shmid_ds
-	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(id)), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
-	if errno != 0 {
-		return nil, errors.Wrap(errno, "failed to get stat")
+	cstat, err := shmStat(s.shmid)
+	if err != nil {
+		return nil, err
 	}
 	return &C_shmid_ds{
 		Shm_perm: C_ipc_perm{
@@ -230,6 +202,37 @@ func stat(id int) (*C_shmid_ds, error) {
 		Shm_lpid:   int32(cstat.shm_lpid),
 		Shm_nattch: uint64(cstat.shm_nattch),
 	}, nil
+}
+
+// SetStat sets the settable fields of shm
+func (s *SharedMemory) SetStat(uid, gid *uint32, mode *uint16) error {
+	cstat, err := shmStat(s.shmid)
+	if err != nil {
+		return err
+	}
+	if uid != nil {
+		cstat.shm_perm.uid = C.uint(*uid)
+	}
+	if gid != nil {
+		cstat.shm_perm.gid = C.uint(*gid)
+	}
+	if mode != nil {
+		cstat.shm_perm.mode = C.ushort(*mode)
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(s.shmid)), uintptr(C.IPC_SET), uintptr(unsafe.Pointer(&cstat)))
+	if errno != 0 {
+		return errors.Wrap(errno, "failed to set stat")
+	}
+	return nil
+}
+
+func shmStat(id int) (*C.struct_shmid_ds, error) {
+	var cstat C.struct_shmid_ds
+	_, _, errno := syscall.Syscall(syscall.SYS_SHMCTL, uintptr(C.int(id)), uintptr(C.IPC_STAT), uintptr(unsafe.Pointer(&cstat)))
+	if errno != 0 {
+		return nil, errors.Wrap(errno, "failed to get stat")
+	}
+	return &cstat, nil
 
 }
 
